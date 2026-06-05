@@ -31,7 +31,7 @@ module.exports = {
             { directory: path.resolve(__dirname, "app") },
             { directory: path.resolve(__dirname, "dist-dev"), publicPath: "/dist-dev" },
         ],
-        port: 3000,
+        port: 4000,
         hot: true,
         open: true,
         headers: {
