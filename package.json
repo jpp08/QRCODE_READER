@@ -1,6 +1,6 @@
 {
   "name": "html5-qrcode",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A cross platform HTML5 QR Code & bar code scanner",
   "main": "./cjs/index.js",
   "module": "./esm/index.js",
@@ -10,7 +10,9 @@
   "scripts": {
     "dev": "webpack serve --config webpack.config.dev.js",
     "build:dev": "webpack --config webpack.config.dev.js",
-    "build:prod": "webpack --config webpack.config.prod.js && type scripts\\webpack_append_data.min.js >> dist\\html5-qrcode.min.js",
+    "build:prod": "webpack --config webpack.config.prod.js && type scripts\\webpack_append_data.min.js >> dist\\html5-qrcode.min.js && copy app-prod\\index.html dist\\index.html",
+    "serve:prod": "npx serve dist -p 5000 --no-clipboard",
+    "start:prod": "npm run build:prod && npm run serve:prod",
     "build-windows": "npm run build:es2015 && npm run build:esm && npm run build:esnext && npm run build:cjs && npm run build:prod && npm run build:typing && npm run build:copy_windows",
     "test": "npm run-script test:build && npm run-script test:run",
     "test_windows": "npm run-script test:build && npm run-script test:run_windows",
@@ -76,6 +78,7 @@
     "remark-cli": "^9.0.0",
     "remark-preset-lint-recommended": "^5.0.0",
     "rewire": "^5.0.0",
+    "serve": "^14.2.6",
     "ts-loader": "^9.1.2",
     "ts-node": "^10.4.0",
     "tsconfig-paths": "^3.12.0",
