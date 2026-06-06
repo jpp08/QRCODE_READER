@@ -477,7 +477,11 @@ let scanner;
 function startScanner() {
     scanner = new Html5QrcodeScanner('qr-reader', {
         fps: 10,
-        qrbox: { width: 280, height: 280 },
+        qrbox: function(vw, vh) {
+            // 75% do menor lado, mínimo 180px — garante que borderShaders (tracker) renderizem
+            const side = Math.max(180, Math.floor(Math.min(vw, vh) * 0.75));
+            return { width: side, height: side };
+        },
         rememberLastUsedCamera: true,
         showTorchButtonIfSupported: true,
     }, false);
