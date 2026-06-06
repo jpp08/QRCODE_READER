@@ -518,6 +518,7 @@ function onScanSuccess(decodedText, decodedResult) {
     }
 
     // ── Nova leitura válida ───────────────────────────────────────────
+    beep();
     scanTotal++; scanOk++;
     lastMs = duration;
     updateMetrics();
@@ -760,6 +761,22 @@ document.querySelectorAll('.tab').forEach(t => {
 document.getElementById('search-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') { pageOffset = 0; loadScans(); }
 });
+
+// ── Beep ─────────────────────────────────────────────────────────────────
+function beep() {
+    try {
+        const ac = new (window.AudioContext || window.webkitAudioContext)();
+        const o  = ac.createOscillator();
+        const g  = ac.createGain();
+        o.connect(g); g.connect(ac.destination);
+        o.type = 'square';
+        o.frequency.value = 1760;
+        g.gain.setValueAtTime(0.15, ac.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.08);
+        o.start(ac.currentTime);
+        o.stop(ac.currentTime + 0.08);
+    } catch {}
+}
 
 // ── Multi-scale scanner (jsQR) ────────────────────────────────────────────
 // Roda em paralelo ao html5-qrcode a ~5fps, tenta decodificar o frame
