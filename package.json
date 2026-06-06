@@ -1,6 +1,6 @@
 {
   "name": "html5-qrcode",
-  "version": "1.0.2",
+  "version": "1.0.7",
   "description": "A cross platform HTML5 QR Code & bar code scanner",
   "main": "./cjs/index.js",
   "module": "./esm/index.js",
@@ -12,7 +12,7 @@
     "server:dev": "cross-env NODE_ENV=development node server/index.js",
     "server:prod": "cross-env NODE_ENV=production node server/index.js",
     "build:dev": "webpack --config webpack.config.dev.js",
-    "build:prod": "webpack --config webpack.config.prod.js && type scripts\\webpack_append_data.min.js >> dist\\html5-qrcode.min.js && copy app-prod\\index.html dist\\index.html && node -e \"const fs=require('fs');fs.mkdirSync('dist/vendor',{recursive:true});fs.copyFileSync('node_modules/jsqr/dist/jsQR.js','dist/vendor/jsQR.js');\"",
+    "build:prod": "webpack --config webpack.config.prod.js && type scripts\\webpack_append_data.min.js >> dist\\html5-qrcode.min.js && copy app-prod\\index.html dist\\index.html && copy app\\pipeline.js dist\\pipeline.js && node -e \"const fs=require('fs');fs.mkdirSync('dist/vendor',{recursive:true});fs.copyFileSync('node_modules/jsqr/dist/jsQR.js','dist/vendor/jsQR.js');\"",
     "start:prod": "npm run build:prod && npm run server:prod",
     "build-windows": "npm run build:es2015 && npm run build:esm && npm run build:esnext && npm run build:cjs && npm run build:prod && npm run build:typing && npm run build:copy_windows",
     "test": "npm run-script test:build && npm run-script test:run",

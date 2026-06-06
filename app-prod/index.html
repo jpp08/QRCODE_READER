@@ -126,6 +126,7 @@ tr:hover td{background:var(--surface2)}
 .feed-text.dup{color:var(--yellow)}
 .feed-fmt{font-size:.62rem;font-weight:700;padding:1px 5px;border-radius:3px;background:var(--surface);border:1px solid var(--border2);color:var(--text3);white-space:nowrap;flex-shrink:0}
 .feed-badge-dup{font-size:.6rem;font-weight:700;padding:1px 5px;border-radius:3px;background:#eab30822;border:1px solid var(--yellow);color:var(--yellow);text-transform:uppercase;letter-spacing:.04em;flex-shrink:0}
+.feed-recipe{font-size:.6rem;padding:1px 5px;border-radius:3px;background:#0ea5e910;border:1px solid #0ea5e940;color:var(--accent);white-space:nowrap;flex-shrink:0;font-family:var(--mono)}
 .feed-time{font-size:.65rem;color:var(--text3);font-family:var(--mono);flex-shrink:0}
 .feed-item--flash{outline:1px solid var(--yellow);animation:feedFlash .7s ease}
 @keyframes feedNew{from{background:var(--surface2)}to{background:transparent}}
@@ -242,11 +243,12 @@ tr:hover td{background:var(--surface2)}
 <div class="toasts" id="toasts"></div>
 
 <script src="./html5-qrcode.min.js"></script>
+<script src="./pipeline.js"></script>
 <script src="./vendor/jsQR.js"></script>
 <script>
 const pipeline = new QrPipeline();
 const API = '';
-const VERSION = '1.0.2';
+const VERSION = '1.0.7';
 let sessionId=null,scanTotal=0,scanOk=0,lastMs=0,scanStart=0,pageOffset=0;
 const PAGE_SIZE=50;
 const lastScanMap=new Map();
@@ -260,16 +262,17 @@ async function checkApi(){try{const r=await fetch('/api/health');const d=await r
 async function createSession(){try{const r=await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_info:{userAgent:navigator.userAgent}})});return(await r.json()).id;}catch{return null;}}
 
 let scanner;
-function startScanner(){scanner=new Html5QrcodeScanner('qr-reader',{fps:10,qrbox:function(vw,vh){const side=Math.max(180,Math.floor(Math.min(vw,vh)*0.75));return{width:side,height:side};},rememberLastUsedCamera:true,showTorchButtonIfSupported:true,experimentalFeatures:{useBarCodeDetectorIfSupported:true}},false);scanner.render(onScanSuccess,()=>{if(!scanStart)scanStart=Date.now();});setTimeout(startMultiScale,1500);}
+function startScanner(){scanner=new Html5QrcodeScanner('qr-reader',{fps:10,qrbox:function(vw,vh){const side=Math.max(180,Math.floor(Math.min(vw,vh)*0.75));return{width:side,height:side};},rememberLastUsedCamera:true,showTorchButtonIfSupported:true,experimentalFeatures:{useBarCodeDetectorIfSupported:true}},false);scanner.render(onScanSuccess,()=>{if(!scanStart)scanStart=Date.now();});setTimeout(startSmartScanner,1500);}
 
 function onScanSuccess(decodedText,decodedResult){
   const now=Date.now();
   const dur=scanStart?now-scanStart:null;
   scanStart=now;
   const format=decodedResult?.result?.format?.formatName??'UNKNOWN';
+  const source=decodedResult?._recipe??decodedResult?._source??null;
   const prev=lastScanMap.get(decodedText);
   const isDup=prev&&(now-prev.time<COOLDOWN_MS);
-  addToFeed(decodedText,format,isDup);
+  addToFeed(decodedText,format,isDup,source);
   if(isDup){
     if(prev.el){prev.el.classList.remove('feed-item--flash');void prev.el.offsetWidth;prev.el.classList.add('feed-item--flash');}
     toast(`Já lido: ${decodedText.substring(0,36)}`,'warn');
@@ -284,7 +287,7 @@ function onScanSuccess(decodedText,decodedResult){
   saveScan({session_id:sessionId,decoded_text:decodedText,format,read_success:1,source:'camera',scan_duration_ms:dur,device_label:getDeviceLabel(),...pData,raw_result:rawSafe},decodedText);
 }
 
-function addToFeed(text,format,isDup){
+function addToFeed(text,format,isDup,source){
   feedTotal++;
   document.getElementById('feed-count').textContent=`${feedTotal} leituras`;
   const list=document.getElementById('feed-list');
@@ -292,7 +295,7 @@ function addToFeed(text,format,isDup){
   const time=new Date().toLocaleTimeString('pt-BR');
   const el=document.createElement('div');
   el.className='feed-item'+(isDup?' feed-item--dup':' feed-item--new');
-  el.innerHTML=`<div class="feed-dot ${isDup?'dup':'ok'}"></div><div class="feed-body"><span class="feed-text${isDup?' dup':''}" title="${esc(text)}">${esc(text)}</span><span class="feed-fmt">${esc(format)}</span>${isDup?'<span class="feed-badge-dup">DUP</span>':''}</div><span class="feed-time">${time}</span>`;
+  el.innerHTML=`<div class="feed-dot ${isDup?'dup':'ok'}"></div><div class="feed-body"><span class="feed-text${isDup?' dup':''}" title="${esc(text)}">${esc(text)}</span><span class="feed-fmt">${esc(format)}</span>${source?`<span class="feed-recipe">${esc(source)}</span>`:''}${isDup?'<span class="feed-badge-dup">DUP</span>':''}</div><span class="feed-time">${time}</span>`;
   list.appendChild(el);
   list.scrollTop=list.scrollHeight;
   while(list.children.length>MAX_FEED)list.removeChild(list.firstChild);
@@ -322,27 +325,71 @@ document.getElementById('search-input').addEventListener('keydown',e=>{if(e.key=
 
 function beep(){try{const ac=new(window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator();const g=ac.createGain();o.connect(g);g.connect(ac.destination);o.type='square';o.frequency.value=1760;g.gain.setValueAtTime(0.15,ac.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+0.08);o.start(ac.currentTime);o.stop(ac.currentTime+0.08);}catch{}}
 
-const MULTI_SCALES=[ 1.5,2.0],MULTI_INTERVAL=200;
-let multiLastRun=0;
-function startMultiScale(){
+const SMART_MAX_W=640,SMART_BUDGET=80,SMART_TICK=280;
+const SMART_RECIPES=[
+  {id:'sharp',        scale:1.0, pre:['sharpen'],                adaptive:false},
+  {id:'ac+sharp',     scale:1.0, pre:['autoContrast','sharpen'], adaptive:false},
+  {id:'1.5x',         scale:1.5, pre:[],                         adaptive:false},
+  {id:'1.5x+sharp',   scale:1.5, pre:['sharpen'],                adaptive:false},
+  {id:'2x',           scale:2.0, pre:[],                         adaptive:false},
+  {id:'2x+sharp',     scale:2.0, pre:['sharpen'],                adaptive:false},
+  {id:'clahe',        scale:1.0, pre:['clahe'],                  adaptive:false},
+  {id:'clahe+sharp',  scale:1.0, pre:['clahe','sharpen'],        adaptive:false},
+  {id:'1.5x+clahe',   scale:1.5, pre:['clahe','sharpen'],        adaptive:false},
+  {id:'2x+clahe',     scale:2.0, pre:['clahe','sharpen'],        adaptive:false},
+  {id:'gauss+adapt',  scale:1.0, pre:['gaussian'],               adaptive:true },
+  {id:'clahe+adapt',  scale:1.0, pre:['clahe'],                  adaptive:true },
+  {id:'1.5x+adapt',   scale:1.5, pre:['clahe'],                  adaptive:true },
+  {id:'3x',           scale:3.0, pre:[],                         adaptive:false},
+  {id:'3x+clahe',     scale:3.0, pre:['clahe','sharpen'],        adaptive:false},
+  {id:'0.75x+sharp',  scale:0.75,pre:['sharpen'],                adaptive:false},
+];
+let smartLastTick=0,smartBestIdx=0;
+function sampleFrame(video,scale){
+  const vw=video.videoWidth,vh=video.videoHeight;
+  let sx=0,sy=0,sw=vw,sh=vh;
+  if(scale>1.0){sw=Math.max(1,(vw/scale)|0);sh=Math.max(1,(vh/scale)|0);sx=((vw-sw)/2)|0;sy=((vh-sh)/2)|0;}
+  const outW=Math.min(sw,SMART_MAX_W),outH=Math.max(1,Math.round(sh*outW/sw));
+  const c=document.createElement('canvas');c.width=outW;c.height=outH;
+  c.getContext('2d').drawImage(video,sx,sy,sw,sh,0,0,outW,outH);
+  return c;
+}
+function tryRecipe(video,recipe){
+  try{
+    let c=sampleFrame(video,recipe.scale);
+    c=pipeline._grayscale(c);
+    for(const step of recipe.pre){
+      if(step==='gaussian')c=pipeline._gaussianBlur(c);
+      else if(step==='sharpen')c=pipeline._sharpen(c);
+      else if(step==='clahe')c=pipeline._clahe(c);
+      else if(step==='autoContrast')c=pipeline._autoContrast(c);
+    }
+    if(recipe.adaptive)c=pipeline._adaptiveThreshold(c);
+    const{data,width,height}=c.getContext('2d').getImageData(0,0,c.width,c.height);
+    const code=jsQR(data,width,height,{inversionAttempts:'attemptBoth'});
+    return code?.data?code:null;
+  }catch{return null;}
+}
+function startSmartScanner(){
   if(!window.jsQR)return;
+  const n=SMART_RECIPES.length;
   (function loop(){
     requestAnimationFrame(loop);
     const now=Date.now();
-    if(now-multiLastRun<MULTI_INTERVAL)return;
-    multiLastRun=now;
+    if(now-smartLastTick<SMART_TICK)return;
+    smartLastTick=now;
     const video=document.querySelector('#qr-reader video');
     if(!video||video.paused||video.ended||!video.videoWidth)return;
-    const vw=video.videoWidth,vh=video.videoHeight;
-    for(const scale of MULTI_SCALES){
-      const w=Math.min(Math.floor(vw*scale),1280),h=Math.round(vh*w/vw);
-      const c=document.createElement('canvas');c.width=w;c.height=h;
-      const ctx=c.getContext('2d');ctx.drawImage(video,0,0,w,h);
-      const imgData=ctx.getImageData(0,0,w,h);
-      const code=jsQR(imgData.data,w,h,{inversionAttempts:'attemptBoth'});
-      if(code&&code.data){
-        onScanSuccess(code.data,{result:{format:{formatName:'QR_CODE'},bounds:code.location},_source:`multiscale-${scale}x`});
-        return;
+    const budget=Date.now()+SMART_BUDGET;
+    for(let i=0;i<n;i++){
+      if(Date.now()>budget)break;
+      const idx=(smartBestIdx+i)%n;
+      const recipe=SMART_RECIPES[idx];
+      const code=tryRecipe(video,recipe);
+      if(code){
+        smartBestIdx=idx;
+        onScanSuccess(code.data,{result:{format:{formatName:'QR_CODE'},bounds:code.location},_recipe:recipe.id});
+        break;
       }
     }
   })();

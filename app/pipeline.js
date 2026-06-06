@@ -182,6 +182,151 @@ class QrPipeline {
         return sorted[Math.floor(sorted.length * 0.25)] || null;
     }
 
+    // ── Pré-processamento para smart scanner ──────────────────────────────
+
+    /** Blur Gaussiano 3×3 — suaviza ruído de sensor */
+    _gaussianBlur(src) {
+        const dst = this._cloneCanvas(src);
+        const ctx = dst.getContext('2d');
+        const img = ctx.getImageData(0, 0, dst.width, dst.height);
+        const d = img.data, W = dst.width, H = dst.height;
+        const tmp = new Uint8ClampedArray(d);
+        for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+                let s  = tmp[((y-1)*W+(x-1))*4]     + tmp[((y-1)*W+x)*4]*2 + tmp[((y-1)*W+(x+1))*4];
+                    s += tmp[(y*W+(x-1))*4]*2 + tmp[(y*W+x)*4]*4 + tmp[(y*W+(x+1))*4]*2;
+                    s += tmp[((y+1)*W+(x-1))*4]     + tmp[((y+1)*W+x)*4]*2 + tmp[((y+1)*W+(x+1))*4];
+                const pi = (y*W+x)*4;
+                d[pi] = d[pi+1] = d[pi+2] = s >> 4;
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+        return dst;
+    }
+
+    /** Unsharp mask 3×3 — aumenta nitidez das bordas */
+    _sharpen(src) {
+        const dst = this._cloneCanvas(src);
+        const ctx = dst.getContext('2d');
+        const img = ctx.getImageData(0, 0, dst.width, dst.height);
+        const d = img.data, W = dst.width, H = dst.height;
+        const tmp = new Uint8ClampedArray(d);
+        for (let y = 1; y < H - 1; y++) {
+            for (let x = 1; x < W - 1; x++) {
+                const c   = tmp[(y*W+x)*4];
+                const lap = tmp[((y-1)*W+x)*4] + tmp[((y+1)*W+x)*4]
+                          + tmp[(y*W+(x-1))*4] + tmp[(y*W+(x+1))*4];
+                const pi = (y*W+x)*4;
+                d[pi] = d[pi+1] = d[pi+2] = Math.max(0, Math.min(255, c*5 - lap));
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+        return dst;
+    }
+
+    /** Auto-contraste — estica histograma para [0, 255] */
+    _autoContrast(src) {
+        const dst = this._cloneCanvas(src);
+        const ctx = dst.getContext('2d');
+        const img = ctx.getImageData(0, 0, dst.width, dst.height);
+        const d = img.data;
+        let mn = 255, mx = 0;
+        for (let i = 0; i < d.length; i += 4) {
+            if (d[i] < mn) mn = d[i];
+            if (d[i] > mx) mx = d[i];
+        }
+        if (mx - mn < 10) return dst;
+        const range = mx - mn;
+        for (let i = 0; i < d.length; i += 4) {
+            const v = ((d[i] - mn) / range * 255 + 0.5) | 0;
+            d[i] = d[i+1] = d[i+2] = v;
+        }
+        ctx.putImageData(img, 0, 0);
+        return dst;
+    }
+
+    /** CLAHE — equalização de histograma adaptativa por tiles */
+    _clahe(src, tileSize = 64, clipLimit = 3.0) {
+        const dst = this._cloneCanvas(src);
+        const ctx = dst.getContext('2d');
+        const img = ctx.getImageData(0, 0, dst.width, dst.height);
+        const d = img.data, W = dst.width, H = dst.height;
+
+        for (let y0 = 0; y0 < H; y0 += tileSize) {
+            for (let x0 = 0; x0 < W; x0 += tileSize) {
+                const x1 = Math.min(x0 + tileSize, W);
+                const y1 = Math.min(y0 + tileSize, H);
+                const n  = (x1 - x0) * (y1 - y0);
+                if (n < 4) continue;
+
+                const hist = new Int32Array(256);
+                for (let y = y0; y < y1; y++)
+                    for (let x = x0; x < x1; x++)
+                        hist[d[(y*W+x)*4]]++;
+
+                const limit = Math.max(1, (clipLimit * n / 256 + 0.5) | 0);
+                let excess = 0;
+                for (let i = 0; i < 256; i++) {
+                    if (hist[i] > limit) { excess += hist[i] - limit; hist[i] = limit; }
+                }
+                const add = (excess / 256) | 0;
+                for (let i = 0; i < 256; i++) hist[i] += add;
+
+                const lut = new Uint8Array(256);
+                let cdf = 0, cdfMin = 0, found = false;
+                for (let i = 0; i < 256; i++) {
+                    if (!found && hist[i] > 0) { cdfMin = hist[i]; found = true; }
+                    cdf += hist[i];
+                    lut[i] = n > cdfMin ? ((cdf - cdfMin) / (n - cdfMin) * 255 + 0.5) | 0 : 0;
+                }
+
+                for (let y = y0; y < y1; y++) {
+                    for (let x = x0; x < x1; x++) {
+                        const pi = (y*W+x)*4;
+                        const v  = lut[d[pi]];
+                        d[pi] = d[pi+1] = d[pi+2] = v;
+                    }
+                }
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+        return dst;
+    }
+
+    /** Threshold adaptativo via integral image — binarização local */
+    _adaptiveThreshold(src, blockSize = 15, C = 4) {
+        const dst = this._cloneCanvas(src);
+        const ctx = dst.getContext('2d');
+        const img = ctx.getImageData(0, 0, dst.width, dst.height);
+        const d = img.data, W = dst.width, H = dst.height;
+        const half = blockSize >> 1;
+
+        // Integral image (Int32: max = W*H*255 ≈ 78M, cabe em 32 bits)
+        const ii = new Int32Array((W + 1) * (H + 1));
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                ii[(y+1)*(W+1)+(x+1)] = d[(y*W+x)*4]
+                    + ii[y*(W+1)+(x+1)] + ii[(y+1)*(W+1)+x] - ii[y*(W+1)+x];
+            }
+        }
+
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                const x0 = Math.max(0, x - half), y0 = Math.max(0, y - half);
+                const x1 = Math.min(W-1, x + half), y1 = Math.min(H-1, y + half);
+                const cnt  = (x1-x0+1) * (y1-y0+1);
+                const sum  = ii[(y1+1)*(W+1)+(x1+1)] - ii[y0*(W+1)+(x1+1)]
+                           - ii[(y1+1)*(W+1)+x0]      + ii[y0*(W+1)+x0];
+                const mean = (sum / cnt + 0.5) | 0;
+                const pi   = (y*W+x)*4;
+                const v    = d[pi] < mean - C ? 0 : 255;
+                d[pi] = d[pi+1] = d[pi+2] = v;
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+        return dst;
+    }
+
     _cloneCanvas(src) {
         const dst = document.createElement('canvas');
         dst.width  = src.width;
