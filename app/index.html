@@ -204,7 +204,37 @@ tr:hover td{background:var(--surface2)}
 }
 .toast.ok   {border-color:#22c55e55;color:var(--green)}
 .toast.error{border-color:#ef444455;color:var(--red)}
+.toast.warn {border-color:#eab30855;color:var(--yellow)}
 @keyframes slideIn{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+
+/* Live Feed */
+.livefeed{border-top:1px solid var(--border);display:flex;flex-direction:column;min-height:0;flex:1}
+.livefeed__header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:6px 14px;background:var(--surface2);border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.livefeed__title{font-size:.68rem;color:var(--text3);text-transform:uppercase;letter-spacing:.06em}
+.livefeed__count{font-size:.68rem;font-family:var(--mono);color:var(--text3)}
+.livefeed__empty{padding:16px;text-align:center;font-size:.75rem;color:var(--text3)}
+.livefeed__list{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+.feed-item{
+  display:flex;align-items:center;gap:8px;padding:6px 12px;
+  border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.feed-item--dup{background:#eab30808}
+.feed-item--new{animation:feedNew .4s ease}
+.feed-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.feed-dot.ok {background:var(--green)}
+.feed-dot.dup{background:var(--yellow)}
+.feed-body{flex:1;min-width:0;display:flex;align-items:center;gap:6px}
+.feed-text{font-size:.73rem;font-family:var(--mono);color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.feed-text.dup{color:var(--yellow)}
+.feed-fmt{font-size:.62rem;font-weight:700;padding:1px 5px;border-radius:3px;background:var(--surface);border:1px solid var(--border2);color:var(--text3);white-space:nowrap;flex-shrink:0}
+.feed-badge-dup{font-size:.6rem;font-weight:700;padding:1px 5px;border-radius:3px;background:#eab30822;border:1px solid var(--yellow);color:var(--yellow);text-transform:uppercase;letter-spacing:.04em;flex-shrink:0}
+.feed-time{font-size:.65rem;color:var(--text3);font-family:var(--mono);flex-shrink:0}
+.feed-item--flash{outline:1px solid var(--yellow);animation:feedFlash .7s ease}
+@keyframes feedNew  {from{background:var(--surface2)}to{background:transparent}}
+@keyframes feedFlash{0%,100%{background:transparent}40%,60%{background:#eab30820}}
 
 /* Scrollbar */
 ::-webkit-scrollbar{width:6px;height:6px}
@@ -276,6 +306,17 @@ tr:hover td{background:var(--surface2)}
         <div class="step"><div class="step__icon idle" id="p1">2</div><span class="step__label">Binarização (Otsu)</span><span class="step__val" id="pv1">—</span></div>
         <div class="step"><div class="step__icon idle" id="p2">3</div><span class="step__label">Extração de matriz</span><span class="step__val" id="pv2">—</span></div>
         <div class="step"><div class="step__icon idle" id="p3">4</div><span class="step__label">Persistência (DB)</span><span class="step__val" id="pv3">—</span></div>
+      </div>
+    </div>
+
+    <!-- Live Feed -->
+    <div class="livefeed">
+      <div class="livefeed__header">
+        <span class="livefeed__title">Live Feed</span>
+        <span class="livefeed__count" id="feed-count">0 leituras</span>
+      </div>
+      <div class="livefeed__list" id="feed-list">
+        <div class="livefeed__empty">Aguardando leituras…</div>
       </div>
     </div>
   </div>
@@ -390,6 +431,12 @@ let scanStart  = 0;
 let pageOffset = 0;
 const PAGE_SIZE = 50;
 
+// Dedup / live feed
+const lastScanMap  = new Map();   // text → { time, el }
+const COOLDOWN_MS  = 2500;
+let feedTotal      = 0;
+const MAX_FEED     = 200;
+
 // ── Init ─────────────────────────────────────────────────────────────────
 document.getElementById('app-version').textContent = VERSION;
 
@@ -438,37 +485,59 @@ function startScanner() {
 }
 
 function onScanSuccess(decodedText, decodedResult) {
-    const duration = scanStart ? Date.now() - scanStart : null;
-    scanStart = Date.now();
+    const now = Date.now();
+    const duration = scanStart ? now - scanStart : null;
+    scanStart = now;
+
+    const format = decodedResult?.result?.format?.formatName ?? 'UNKNOWN';
+
+    // ── Dedup check ───────────────────────────────────────────────────
+    const prev = lastScanMap.get(decodedText);
+    const isDup = prev && (now - prev.time < COOLDOWN_MS);
+
+    addToFeed(decodedText, format, isDup);
+
+    if (isDup) {
+        // Pisca o item anterior no feed
+        if (prev.el) {
+            prev.el.classList.remove('feed-item--flash');
+            void prev.el.offsetWidth; // force reflow
+            prev.el.classList.add('feed-item--flash');
+        }
+        toast(`Já lido: ${decodedText.substring(0, 36)}`, 'warn');
+        return;
+    }
+
+    // ── Nova leitura válida ───────────────────────────────────────────
     scanTotal++; scanOk++;
     lastMs = duration;
     updateMetrics();
     setPipelineRunning();
 
-    // Captura canvas do scanner
     const canvas = document.querySelector('#qr-reader canvas:not([style*="display: none"])') ||
                    document.getElementById('qr-canvas');
-
-    // Executa pipeline
-    const pData = canvas ? pipeline.run(canvas, decodedResult) : {};
+    const pData  = canvas ? pipeline.run(canvas, decodedResult) : {};
     updatePipelineUI(pData);
 
-    const format = decodedResult?.result?.format?.formatName ?? 'UNKNOWN';
     const device = getDeviceLabel();
 
+    // Serializa raw_result com segurança (evita circular refs)
+    let rawSafe = null;
+    try { rawSafe = JSON.parse(JSON.stringify(decodedResult)); } catch { /* ok */ }
+
     const payload = {
-        session_id:      sessionId,
-        decoded_text:    decodedText,
-        format:          format,
-        read_success:    1,
-        source:          'camera',
+        session_id:       sessionId,
+        decoded_text:     decodedText,
+        format:           format,
+        read_success:     1,
+        source:           'camera',
         scan_duration_ms: duration,
-        device_label:    device,
+        device_label:     device,
         ...pData,
-        raw_result: decodedResult,
+        raw_result:       rawSafe,
     };
 
-    saveScan(payload);
+    saveScan(payload, decodedText);
 }
 
 function onScanError() {
@@ -506,8 +575,37 @@ function markPersisted(ok) {
     setStep('p3', 'pv3', ok, ok ? 'salvo' : 'erro');
 }
 
+// ── Live Feed ─────────────────────────────────────────────────────────────
+function addToFeed(text, format, isDup) {
+    feedTotal++;
+    document.getElementById('feed-count').textContent = `${feedTotal} leituras`;
+
+    const list = document.getElementById('feed-list');
+    const ph   = list.querySelector('.livefeed__empty');
+    if (ph) ph.remove();
+
+    const time = new Date().toLocaleTimeString('pt-BR');
+    const el   = document.createElement('div');
+    el.className = 'feed-item' + (isDup ? ' feed-item--dup' : ' feed-item--new');
+    el.innerHTML = `
+      <div class="feed-dot ${isDup ? 'dup' : 'ok'}"></div>
+      <div class="feed-body">
+        <span class="feed-text${isDup ? ' dup' : ''}" title="${esc(text)}">${esc(text)}</span>
+        <span class="feed-fmt">${esc(format)}</span>
+        ${isDup ? '<span class="feed-badge-dup">DUP</span>' : ''}
+      </div>
+      <span class="feed-time">${time}</span>`;
+
+    list.appendChild(el);
+    list.scrollTop = list.scrollHeight;
+
+    while (list.children.length > MAX_FEED) list.removeChild(list.firstChild);
+
+    if (!isDup) lastScanMap.set(text, { time: Date.now(), el });
+}
+
 // ── API ───────────────────────────────────────────────────────────────────
-async function saveScan(payload) {
+async function saveScan(payload, decodedText) {
     try {
         const r = await fetch(`${API}/api/scans`, {
             method:'POST', headers:{'Content-Type':'application/json'},
@@ -515,12 +613,13 @@ async function saveScan(payload) {
         });
         const d = await r.json();
         markPersisted(!!d.id);
-        toast(`✓ ${payload.decoded_text.substring(0,40)} [${payload.format}]`, 'ok');
+        toast(`✓ ${(decodedText ?? payload.decoded_text).substring(0,40)} [${payload.format}]`, 'ok');
         loadScans();
         loadStats();
     } catch(e) {
         markPersisted(false);
         toast('Erro ao salvar no banco', 'error');
+        console.error('[saveScan]', e);
     }
 }
 
