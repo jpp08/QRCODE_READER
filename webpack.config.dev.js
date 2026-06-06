@@ -30,6 +30,7 @@ module.exports = {
         static: [
             { directory: path.resolve(__dirname, "app") },
             { directory: path.resolve(__dirname, "dist-dev"), publicPath: "/dist-dev" },
+            { directory: path.resolve(__dirname, "node_modules/jsqr/dist"), publicPath: "/vendor" },
         ],
         port: 4000,
         hot: true,

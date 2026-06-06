@@ -242,6 +242,7 @@ tr:hover td{background:var(--surface2)}
 <div class="toasts" id="toasts"></div>
 
 <script src="./html5-qrcode.min.js"></script>
+<script src="./vendor/jsQR.js"></script>
 <script>
 const pipeline = new QrPipeline();
 const API = '';
@@ -259,7 +260,7 @@ async function checkApi(){try{const r=await fetch('/api/health');const d=await r
 async function createSession(){try{const r=await fetch('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_info:{userAgent:navigator.userAgent}})});return(await r.json()).id;}catch{return null;}}
 
 let scanner;
-function startScanner(){scanner=new Html5QrcodeScanner('qr-reader',{fps:10,qrbox:function(vw,vh){const side=Math.max(180,Math.floor(Math.min(vw,vh)*0.75));return{width:side,height:side};},rememberLastUsedCamera:true,showTorchButtonIfSupported:true},false);scanner.render(onScanSuccess,()=>{if(!scanStart)scanStart=Date.now();});}
+function startScanner(){scanner=new Html5QrcodeScanner('qr-reader',{fps:10,qrbox:function(vw,vh){const side=Math.max(180,Math.floor(Math.min(vw,vh)*0.75));return{width:side,height:side};},rememberLastUsedCamera:true,showTorchButtonIfSupported:true,experimentalFeatures:{useBarCodeDetectorIfSupported:true}},false);scanner.render(onScanSuccess,()=>{if(!scanStart)scanStart=Date.now();});setTimeout(startMultiScale,1500);}
 
 function onScanSuccess(decodedText,decodedResult){
   const now=Date.now();
@@ -318,6 +319,33 @@ function nextPage(){pageOffset+=PAGE_SIZE;loadScans();}
 function clearFilter(){document.getElementById('search-input').value='';pageOffset=0;loadScans();}
 document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{document.querySelectorAll('.tab,.tab-content').forEach(e=>e.classList.remove('active'));t.classList.add('active');document.querySelector(`.tab-content[data-content="${t.dataset.tab}"]`).classList.add('active');if(t.dataset.tab==='stats')loadStats();});});
 document.getElementById('search-input').addEventListener('keydown',e=>{if(e.key==='Enter'){pageOffset=0;loadScans();}});
+
+const MULTI_SCALES=[ 1.5,2.0],MULTI_INTERVAL=200;
+let multiLastRun=0;
+function startMultiScale(){
+  if(!window.jsQR)return;
+  (function loop(){
+    requestAnimationFrame(loop);
+    const now=Date.now();
+    if(now-multiLastRun<MULTI_INTERVAL)return;
+    multiLastRun=now;
+    const video=document.querySelector('#qr-reader video');
+    if(!video||video.paused||video.ended||!video.videoWidth)return;
+    const vw=video.videoWidth,vh=video.videoHeight;
+    for(const scale of MULTI_SCALES){
+      const w=Math.min(Math.floor(vw*scale),1280),h=Math.round(vh*w/vw);
+      const c=document.createElement('canvas');c.width=w;c.height=h;
+      const ctx=c.getContext('2d');ctx.drawImage(video,0,0,w,h);
+      const imgData=ctx.getImageData(0,0,w,h);
+      const code=jsQR(imgData.data,w,h,{inversionAttempts:'attemptBoth'});
+      if(code&&code.data){
+        onScanSuccess(code.data,{result:{format:{formatName:'QR_CODE'},bounds:code.location},_source:`multiscale-${scale}x`});
+        return;
+      }
+    }
+  })();
+}
+
 init().then(startScanner);
 </script>
 </body>

@@ -416,6 +416,7 @@ tr:hover td{background:var(--surface2)}
 
 <script src="/dist-dev/html5-qrcode.js"></script>
 <script src="/pipeline.js"></script>
+<script src="/vendor/jsQR.js"></script>
 <script>
 // ── Globals ──────────────────────────────────────────────────────────────
 const Html5QrcodeScanner = window.__Html5QrcodeLibrary__.Html5QrcodeScanner;
@@ -478,14 +479,18 @@ function startScanner() {
     scanner = new Html5QrcodeScanner('qr-reader', {
         fps: 10,
         qrbox: function(vw, vh) {
-            // 75% do menor lado, mínimo 180px — garante que borderShaders (tracker) renderizem
             const side = Math.max(180, Math.floor(Math.min(vw, vh) * 0.75));
             return { width: side, height: side };
         },
         rememberLastUsedCamera: true,
         showTorchButtonIfSupported: true,
+        // ① BarcodeDetector nativo (Chrome/Edge): alcance muito maior
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
     }, false);
     scanner.render(onScanSuccess, onScanError);
+
+    // ② Multi-scale: inicia 1.5s após o scanner para dar tempo à câmera
+    setTimeout(startMultiScale, 1500);
 }
 
 function onScanSuccess(decodedText, decodedResult) {
@@ -755,6 +760,49 @@ document.querySelectorAll('.tab').forEach(t => {
 document.getElementById('search-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') { pageOffset = 0; loadScans(); }
 });
+
+// ── Multi-scale scanner (jsQR) ────────────────────────────────────────────
+// Roda em paralelo ao html5-qrcode a ~5fps, tenta decodificar o frame
+// em escala 1.5× e 2× para capturar QR codes pequenos/distantes.
+const MULTI_SCALES   = [1.5, 2.0];
+const MULTI_INTERVAL = 200; // ms (~5fps)
+let   multiLastRun   = 0;
+
+function startMultiScale() {
+    if (!window.jsQR) return; // lib não carregada
+
+    (function loop() {
+        requestAnimationFrame(loop);
+        const now = Date.now();
+        if (now - multiLastRun < MULTI_INTERVAL) return;
+        multiLastRun = now;
+
+        const video = document.querySelector('#qr-reader video');
+        if (!video || video.paused || video.ended || !video.videoWidth) return;
+
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+
+        for (const scale of MULTI_SCALES) {
+            const w   = Math.min(Math.floor(vw * scale), 1280);
+            const h   = Math.round(vh * w / vw);
+            const c   = document.createElement('canvas');
+            c.width   = w;
+            c.height  = h;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(video, 0, 0, w, h);
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const code    = jsQR(imgData.data, w, h, { inversionAttempts: 'attemptBoth' });
+            if (code && code.data) {
+                onScanSuccess(code.data, {
+                    result: { format: { formatName: 'QR_CODE' }, bounds: code.location },
+                    _source: `multiscale-${scale}x`,
+                });
+                return; // não tenta escala maior se já achou
+            }
+        }
+    })();
+}
 
 // Boot
 init().then(startScanner);
