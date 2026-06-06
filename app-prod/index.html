@@ -127,6 +127,10 @@ tr:hover td{background:var(--surface2)}
 .feed-fmt{font-size:.62rem;font-weight:700;padding:1px 5px;border-radius:3px;background:var(--surface);border:1px solid var(--border2);color:var(--text3);white-space:nowrap;flex-shrink:0}
 .feed-badge-dup{font-size:.6rem;font-weight:700;padding:1px 5px;border-radius:3px;background:#eab30822;border:1px solid var(--yellow);color:var(--yellow);text-transform:uppercase;letter-spacing:.04em;flex-shrink:0}
 .feed-recipe{font-size:.6rem;padding:1px 5px;border-radius:3px;background:#0ea5e910;border:1px solid #0ea5e940;color:var(--accent);white-space:nowrap;flex-shrink:0;font-family:var(--mono)}
+.feed-tool{font-size:.6rem;font-weight:700;padding:1px 5px;border-radius:3px;white-space:nowrap;flex-shrink:0;font-family:var(--mono)}
+.feed-tool--jsqr{background:#0ea5e910;border:1px solid #0ea5e950;color:var(--accent)}
+.feed-tool--bd{background:#22c55e10;border:1px solid #22c55e50;color:var(--green)}
+.feed-tool--zxing{background:#a78bfa10;border:1px solid #a78bfa50;color:#a78bfa}
 .feed-time{font-size:.65rem;color:var(--text3);font-family:var(--mono);flex-shrink:0}
 .feed-item--flash{outline:1px solid var(--yellow);animation:feedFlash .7s ease}
 @keyframes feedNew{from{background:var(--surface2)}to{background:transparent}}
@@ -184,7 +188,10 @@ tr:hover td{background:var(--surface2)}
     <div class="livefeed">
       <div class="livefeed__header">
         <span class="livefeed__title">Live Feed</span>
-        <span class="livefeed__count" id="feed-count">0 leituras</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="livefeed__count" id="feed-count">0 leituras</span>
+          <button class="btn" style="padding:2px 8px;font-size:.65rem" onclick="clearFeed()">× Limpar</button>
+        </div>
       </div>
       <div class="livefeed__list" id="feed-list">
         <div class="livefeed__empty">Aguardando leituras…</div>
@@ -202,7 +209,7 @@ tr:hover td{background:var(--surface2)}
       <div class="results-toolbar">
         <input class="search-input" type="search" id="search-input" placeholder="Buscar por texto decodificado…"/>
         <button class="btn" onclick="loadScans()">↺ Atualizar</button>
-        <button class="btn btn--accent" onclick="clearFilter()">Limpar</button>
+        <button class="btn" onclick="clearFilter()">Limpar filtro</button>
       </div>
       <div class="table-wrap">
         <table>
@@ -248,13 +255,14 @@ tr:hover td{background:var(--surface2)}
 <script>
 const pipeline = new QrPipeline();
 const API = '';
-const VERSION = '1.0.7';
+const VERSION = '1.0.8';
 let sessionId=null,scanTotal=0,scanOk=0,lastMs=0,scanStart=0,pageOffset=0;
 const PAGE_SIZE=50;
 const lastScanMap=new Map();
 const COOLDOWN_MS=2500;
 let feedTotal=0;
 const MAX_FEED=200;
+const HAS_BD=typeof BarcodeDetector!=='undefined';
 document.getElementById('app-version').textContent=VERSION;
 
 async function init(){await checkApi();sessionId=await createSession();loadScans();loadStats();}
@@ -270,9 +278,10 @@ function onScanSuccess(decodedText,decodedResult){
   scanStart=now;
   const format=decodedResult?.result?.format?.formatName??'UNKNOWN';
   const source=decodedResult?._recipe??decodedResult?._source??null;
+  const tool=source?'jsQR':(HAS_BD?'BarcodeDetector':'ZXing');
   const prev=lastScanMap.get(decodedText);
   const isDup=prev&&(now-prev.time<COOLDOWN_MS);
-  addToFeed(decodedText,format,isDup,source);
+  addToFeed(decodedText,format,isDup,source,tool);
   if(isDup){
     if(prev.el){prev.el.classList.remove('feed-item--flash');void prev.el.offsetWidth;prev.el.classList.add('feed-item--flash');}
     toast(`Já lido: ${decodedText.substring(0,36)}`,'warn');
@@ -287,7 +296,7 @@ function onScanSuccess(decodedText,decodedResult){
   saveScan({session_id:sessionId,decoded_text:decodedText,format,read_success:1,source:'camera',scan_duration_ms:dur,device_label:getDeviceLabel(),...pData,raw_result:rawSafe},decodedText);
 }
 
-function addToFeed(text,format,isDup,source){
+function addToFeed(text,format,isDup,source,tool){
   feedTotal++;
   document.getElementById('feed-count').textContent=`${feedTotal} leituras`;
   const list=document.getElementById('feed-list');
@@ -295,11 +304,21 @@ function addToFeed(text,format,isDup,source){
   const time=new Date().toLocaleTimeString('pt-BR');
   const el=document.createElement('div');
   el.className='feed-item'+(isDup?' feed-item--dup':' feed-item--new');
-  el.innerHTML=`<div class="feed-dot ${isDup?'dup':'ok'}"></div><div class="feed-body"><span class="feed-text${isDup?' dup':''}" title="${esc(text)}">${esc(text)}</span><span class="feed-fmt">${esc(format)}</span>${source?`<span class="feed-recipe">${esc(source)}</span>`:''}${isDup?'<span class="feed-badge-dup">DUP</span>':''}</div><span class="feed-time">${time}</span>`;
+  const toolCls=tool==='jsQR'?'jsqr':tool==='BarcodeDetector'?'bd':'zxing';
+  const toolTag=tool?`<span class="feed-tool feed-tool--${toolCls}">${esc(tool)}</span>`:'';
+  const recipeTag=source?`<span class="feed-recipe">${esc(source)}</span>`:'';
+  el.innerHTML=`<div class="feed-dot ${isDup?'dup':'ok'}"></div><div class="feed-body"><span class="feed-text${isDup?' dup':''}" title="${esc(text)}">${esc(text)}</span><span class="feed-fmt">${esc(format)}</span>${toolTag}${recipeTag}${isDup?'<span class="feed-badge-dup">DUP</span>':''}</div><span class="feed-time">${time}</span>`;
   list.appendChild(el);
   list.scrollTop=list.scrollHeight;
   while(list.children.length>MAX_FEED)list.removeChild(list.firstChild);
   if(!isDup)lastScanMap.set(text,{time:Date.now(),el});
+}
+function clearFeed(){
+  const list=document.getElementById('feed-list');
+  list.innerHTML='<div class="livefeed__empty">Aguardando leituras…</div>';
+  feedTotal=0;
+  document.getElementById('feed-count').textContent='0 leituras';
+  lastScanMap.clear();
 }
 
 function getDeviceLabel(){try{const s=document.querySelector('#qr-reader select');return s?s.options[s.selectedIndex]?.text:null;}catch{return null;}}
