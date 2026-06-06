@@ -1,213 +1,660 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>QR Code Reader — DEV</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>QR/Barcode Reader — DEV</title>
+<style>
+/* ── Reset & tokens ─────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:       #0b0f1a;
+  --surface:  #111827;
+  --surface2: #1a2236;
+  --border:   #1e2d45;
+  --border2:  #263350;
+  --accent:   #0ea5e9;
+  --accent2:  #0284c7;
+  --green:    #22c55e;
+  --yellow:   #eab308;
+  --red:      #ef4444;
+  --text:     #e2e8f0;
+  --text2:    #94a3b8;
+  --text3:    #475569;
+  --mono:     'JetBrains Mono','Fira Mono','Consolas',monospace;
+  --radius:   6px;
+}
+html{height:100%;font-size:14px}
+body{
+  background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  min-height:100%;display:flex;flex-direction:column;
+}
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #0f172a;
-            color: #e2e8f0;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 24px 16px;
-        }
+/* ── Top bar ─────────────────────────────────────────────────────────── */
+.topbar{
+  height:44px;background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:0;padding:0;flex-shrink:0;
+}
+.topbar__brand{
+  display:flex;align-items:center;gap:10px;
+  padding:0 20px;border-right:1px solid var(--border);height:100%;
+}
+.topbar__brand svg{color:var(--accent);flex-shrink:0}
+.topbar__brand-name{font-size:.9rem;font-weight:700;color:var(--text);letter-spacing:.02em}
+.topbar__brand-sub{font-size:.7rem;color:var(--text3);margin-top:1px}
+.topbar__pills{display:flex;align-items:center;gap:6px;padding:0 16px;border-right:1px solid var(--border);height:100%}
+.pill{
+  font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:3px;
+  text-transform:uppercase;letter-spacing:.06em;
+}
+.pill--dev{background:#7c3aed22;color:#a78bfa;border:1px solid #7c3aed44}
+.pill--live{background:#22c55e18;color:#4ade80;border:1px solid #22c55e44}
+.pill--db{background:#0ea5e918;color:#38bdf8;border:1px solid #0ea5e944}
+.topbar__status{display:flex;align-items:center;gap:16px;padding:0 16px;margin-left:auto}
+.status-item{display:flex;align-items:center;gap:5px;font-size:.72rem;color:var(--text2)}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--text3)}
+.status-dot.on{background:var(--green);box-shadow:0 0 5px var(--green)}
+.status-dot.warn{background:var(--yellow)}
+.topbar__ver{font-size:.7rem;color:var(--text3);padding:0 16px;border-left:1px solid var(--border)}
 
-        header {
-            width: 100%;
-            max-width: 640px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 24px;
-        }
+/* ── Main layout ─────────────────────────────────────────────────────── */
+.layout{display:grid;grid-template-columns:340px 1fr;flex:1;overflow:hidden;min-height:0}
+@media(max-width:900px){.layout{grid-template-columns:1fr}}
 
-        header h1 {
-            font-size: 1.4rem;
-            font-weight: 700;
-            color: #f1f5f9;
-        }
+/* ── Left column ─────────────────────────────────────────────────────── */
+.col-left{
+  border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;
+}
 
-        .env-badge {
-            background: #ef4444;
-            color: #fff;
-            font-size: 0.7rem;
-            font-weight: 700;
-            padding: 3px 10px;
-            border-radius: 999px;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-        }
+/* Scanner panel */
+.scanner-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface2);
+}
+.scanner-header__title{font-size:.78rem;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.06em}
+.scanner-header__fps{font-size:.72rem;color:var(--text3);font-family:var(--mono)}
+.scanner-wrap{background:#000;position:relative}
+.scanner-wrap #qr-reader{width:100%}
 
-        .version-badge {
-            font-size: 0.75rem;
-            color: #64748b;
-            margin-left: 8px;
-        }
+/* Metrics bar */
+.metrics{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  border-top:1px solid var(--border);
+}
+.metric{
+  padding:10px 12px;border-right:1px solid var(--border);
+  display:flex;flex-direction:column;gap:2px;
+}
+.metric:last-child{border-right:none}
+.metric__label{font-size:.65rem;color:var(--text3);text-transform:uppercase;letter-spacing:.05em}
+.metric__val{font-size:1.3rem;font-weight:700;font-family:var(--mono);color:var(--text)}
+.metric__val.green{color:var(--green)}
+.metric__val.yellow{color:var(--yellow)}
+.metric__val.red{color:var(--red)}
 
-        .scanner-wrapper {
-            width: 100%;
-            max-width: 540px;
-            background: #1e293b;
-            border-radius: 12px;
-            overflow: hidden;
-            border: 1px solid #334155;
-        }
+/* Pipeline status */
+.pipeline{border-top:1px solid var(--border);padding:10px 14px;background:var(--surface2)}
+.pipeline__title{font-size:.68rem;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+.pipeline__steps{display:flex;flex-direction:column;gap:4px}
+.step{display:flex;align-items:center;gap:8px}
+.step__icon{width:16px;height:16px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:.6rem;font-weight:700}
+.step__icon.idle   {background:var(--surface);border:1px solid var(--border2);color:var(--text3)}
+.step__icon.ok     {background:#22c55e22;border:1px solid #22c55e55;color:var(--green)}
+.step__icon.running{background:#0ea5e922;border:1px solid #0ea5e955;color:var(--accent);animation:pulse .8s infinite}
+.step__label{font-size:.72rem;color:var(--text2);flex:1}
+.step__val  {font-size:.68rem;color:var(--text3);font-family:var(--mono)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
-        #qr-reader {
-            width: 100%;
-        }
+/* ── Right column ─────────────────────────────────────────────────────── */
+.col-right{display:flex;flex-direction:column;overflow:hidden}
 
-        .result-panel {
-            width: 100%;
-            max-width: 540px;
-            margin-top: 16px;
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 12px;
-            padding: 16px;
-        }
+/* Tab bar */
+.tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
+.tab{
+  padding:10px 18px;font-size:.76rem;font-weight:600;color:var(--text3);
+  cursor:pointer;border-bottom:2px solid transparent;transition:color .15s;
+  text-transform:uppercase;letter-spacing:.05em;
+}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
 
-        .result-panel h2 {
-            font-size: 0.85rem;
-            font-weight: 600;
-            color: #94a3b8;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            margin-bottom: 12px;
-        }
+/* Tab content */
+.tab-content{display:none;flex:1;overflow:auto;padding:16px}
+.tab-content.active{display:flex;flex-direction:column;gap:12px}
 
-        #result-list {
-            list-style: none;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
+/* Results table */
+.results-toolbar{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.search-input{
+  flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--radius);
+  padding:6px 10px;color:var(--text);font-size:.8rem;outline:none;
+}
+.search-input:focus{border-color:var(--accent)}
+.search-input::placeholder{color:var(--text3)}
+.btn{
+  display:flex;align-items:center;gap:5px;
+  padding:6px 12px;border-radius:var(--radius);font-size:.76rem;font-weight:600;
+  cursor:pointer;border:1px solid var(--border2);background:var(--surface2);
+  color:var(--text2);transition:all .15s;white-space:nowrap;
+}
+.btn:hover{background:var(--border2);color:var(--text)}
+.btn--accent{background:var(--accent2);border-color:var(--accent);color:#fff}
+.btn--accent:hover{background:var(--accent)}
+.btn--danger{background:transparent;border-color:#ef444444;color:var(--red)}
+.btn--danger:hover{background:#ef444414}
 
-        #result-list li {
-            background: #0f172a;
-            border: 1px solid #1e3a5f;
-            border-radius: 8px;
-            padding: 10px 14px;
-            font-size: 0.9rem;
-            word-break: break-all;
-            display: flex;
-            align-items: flex-start;
-            gap: 10px;
-        }
+.table-wrap{overflow:auto;border:1px solid var(--border);border-radius:var(--radius);flex:1;min-height:200px}
+table{width:100%;border-collapse:collapse;font-size:.78rem}
+thead tr{background:var(--surface2)}
+th{
+  text-align:left;padding:8px 10px;color:var(--text3);font-size:.65rem;
+  text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);
+  white-space:nowrap;position:sticky;top:0;background:var(--surface2);
+}
+td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--surface2)}
+.td-text{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:.77rem;color:var(--accent)}
+.td-format{
+  display:inline-block;padding:2px 6px;border-radius:3px;font-size:.65rem;font-weight:700;
+  text-transform:uppercase;background:var(--surface2);border:1px solid var(--border2);color:var(--text2);
+}
+.td-ok   {color:var(--green)}
+.td-fail {color:var(--red)}
+.td-time {color:var(--text3);font-size:.72rem;font-family:var(--mono)}
+.td-dur  {color:var(--text3);font-family:var(--mono);font-size:.72rem}
 
-        #result-list li .tag {
-            font-size: 0.7rem;
-            font-weight: 700;
-            background: #1d4ed8;
-            color: #bfdbfe;
-            padding: 2px 7px;
-            border-radius: 999px;
-            white-space: nowrap;
-            flex-shrink: 0;
-            margin-top: 1px;
-        }
+.table-footer{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 12px;border-top:1px solid var(--border);background:var(--surface2);
+  font-size:.72rem;color:var(--text3);border-radius:0 0 var(--radius) var(--radius);
+}
 
-        #result-list li .text {
-            color: #7dd3fc;
-        }
+/* Stats tab */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+.stat-card{
+  background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;
+}
+.stat-card__label{font-size:.68rem;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.stat-card__val  {font-size:1.8rem;font-weight:700;font-family:var(--mono);color:var(--text)}
+.stat-card__sub  {font-size:.7rem;color:var(--text3);margin-top:2px}
 
-        #result-empty {
-            color: #475569;
-            font-size: 0.85rem;
-            font-style: italic;
-        }
+.format-bars{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.format-bars h3{font-size:.72rem;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px}
+.bar-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.bar-label{font-size:.75rem;color:var(--text2);width:120px;text-align:right;flex-shrink:0}
+.bar-track{flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden}
+.bar-fill {height:100%;background:var(--accent);border-radius:4px;transition:width .4s}
+.bar-count{font-size:.72rem;color:var(--text3);font-family:var(--mono);width:40px;flex-shrink:0}
 
-        footer {
-            margin-top: 32px;
-            font-size: 0.75rem;
-            color: #334155;
-        }
-    </style>
+/* Export tab */
+.export-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.export-card h3{font-size:.76rem;font-weight:600;color:var(--text2);margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em}
+.export-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
+.export-row:last-child{border-bottom:none}
+.export-row__info{flex:1}
+.export-row__name{font-size:.82rem;color:var(--text);font-weight:500}
+.export-row__desc{font-size:.72rem;color:var(--text3);margin-top:2px}
+
+/* Toast */
+.toasts{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:999}
+.toast{
+  padding:10px 16px;border-radius:var(--radius);font-size:.8rem;
+  background:var(--surface2);border:1px solid var(--border2);color:var(--text);
+  animation:slideIn .2s ease;box-shadow:0 4px 20px #000a;
+}
+.toast.ok   {border-color:#22c55e55;color:var(--green)}
+.toast.error{border-color:#ef444455;color:var(--red)}
+@keyframes slideIn{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--surface)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+</style>
 </head>
 <body>
 
-<header>
-    <div>
-        <h1>QR Code Reader <span class="version-badge" id="version-badge">v1.0.0</span></h1>
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="topbar__brand">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <rect x="3" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/>
+      <rect x="3" y="16" width="5" height="5" rx="1"/><path d="M16 16h5v5M16 16v5M11 3v5M3 11h5M11 11h2v2M16 11h2M11 16v2M14 14v5M19 11v2"/>
+    </svg>
+    <div><div class="topbar__brand-name">QR/Barcode Reader</div><div class="topbar__brand-sub">Industrial Scanner System</div></div>
+  </div>
+  <div class="topbar__pills">
+    <span class="pill pill--dev">DEV</span>
+    <span class="pill pill--live" id="pill-live">● LIVE</span>
+    <span class="pill pill--db"  id="pill-db">DB</span>
+  </div>
+  <div class="topbar__status">
+    <div class="status-item"><div class="status-dot" id="dot-cam"></div><span id="lbl-cam">Camera</span></div>
+    <div class="status-item"><div class="status-dot" id="dot-api"></div><span>API :4001</span></div>
+    <div class="status-item"><div class="status-dot" id="dot-db"></div><span>SQLite</span></div>
+  </div>
+  <div class="topbar__ver">v<span id="app-version">1.0.2</span></div>
+</div>
+
+<!-- MAIN LAYOUT -->
+<div class="layout">
+
+  <!-- LEFT: Scanner + pipeline -->
+  <div class="col-left">
+    <div class="scanner-header">
+      <span class="scanner-header__title">Scanner</span>
+      <span class="scanner-header__fps" id="lbl-fps">10 fps</span>
     </div>
-    <span class="env-badge">DEV</span>
-</header>
 
-<div class="scanner-wrapper">
-    <div id="qr-reader"></div>
+    <div class="scanner-wrap">
+      <div id="qr-reader"></div>
+    </div>
+
+    <div class="metrics">
+      <div class="metric">
+        <span class="metric__label">Total</span>
+        <span class="metric__val" id="m-total">0</span>
+      </div>
+      <div class="metric">
+        <span class="metric__label">Sucesso</span>
+        <span class="metric__val green" id="m-ok">0</span>
+      </div>
+      <div class="metric">
+        <span class="metric__label">Taxa</span>
+        <span class="metric__val" id="m-rate">—</span>
+      </div>
+      <div class="metric">
+        <span class="metric__label">Últ. ms</span>
+        <span class="metric__val" id="m-ms">—</span>
+      </div>
+    </div>
+
+    <div class="pipeline">
+      <div class="pipeline__title">Pipeline de Processamento</div>
+      <div class="pipeline__steps" id="pipeline-steps">
+        <div class="step"><div class="step__icon idle" id="p0">1</div><span class="step__label">Captura (grayscale)</span><span class="step__val" id="pv0">—</span></div>
+        <div class="step"><div class="step__icon idle" id="p1">2</div><span class="step__label">Binarização (Otsu)</span><span class="step__val" id="pv1">—</span></div>
+        <div class="step"><div class="step__icon idle" id="p2">3</div><span class="step__label">Extração de matriz</span><span class="step__val" id="pv2">—</span></div>
+        <div class="step"><div class="step__icon idle" id="p3">4</div><span class="step__label">Persistência (DB)</span><span class="step__val" id="pv3">—</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Tabs -->
+  <div class="col-right">
+    <div class="tabs">
+      <div class="tab active" data-tab="results">Resultados</div>
+      <div class="tab" data-tab="stats">Estatísticas</div>
+      <div class="tab" data-tab="export">Exportar</div>
+    </div>
+
+    <!-- TAB: Resultados -->
+    <div class="tab-content active" data-content="results">
+      <div class="results-toolbar">
+        <input class="search-input" type="search" id="search-input" placeholder="Buscar por texto decodificado…"/>
+        <button class="btn" onclick="loadScans()">↺ Atualizar</button>
+        <button class="btn btn--accent" onclick="clearFilter()">Limpar</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Texto</th><th>Formato</th><th>Status</th>
+              <th>Threshold</th><th>Matriz</th><th>Versão QR</th><th>Duração</th><th>Timestamp</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="result-tbody">
+            <tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text3)">Aguardando leituras…</td></tr>
+          </tbody>
+        </table>
+        <div class="table-footer">
+          <span id="tbl-info">0 registros</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="prevPage()">‹ Anterior</button>
+            <button class="btn" onclick="nextPage()">Próxima ›</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Estatísticas -->
+    <div class="tab-content" data-content="stats">
+      <div class="stats-grid" id="stats-grid">
+        <div class="stat-card"><div class="stat-card__label">Total Leituras</div><div class="stat-card__val" id="st-total">—</div></div>
+        <div class="stat-card"><div class="stat-card__label">Sucesso</div><div class="stat-card__val" id="st-ok" style="color:var(--green)">—</div></div>
+        <div class="stat-card"><div class="stat-card__label">Falhas</div><div class="stat-card__val" id="st-fail" style="color:var(--red)">—</div></div>
+        <div class="stat-card"><div class="stat-card__label">Taxa Sucesso</div><div class="stat-card__val" id="st-rate">—</div><div class="stat-card__sub">%</div></div>
+        <div class="stat-card"><div class="stat-card__label">Duração Média</div><div class="stat-card__val" id="st-dur">—</div><div class="stat-card__sub">ms</div></div>
+        <div class="stat-card"><div class="stat-card__label">Formatos</div><div class="stat-card__val" id="st-fmts">—</div></div>
+      </div>
+      <div class="format-bars">
+        <h3>Leituras por formato</h3>
+        <div id="format-bars-body"></div>
+      </div>
+    </div>
+
+    <!-- TAB: Exportar -->
+    <div class="tab-content" data-content="export">
+      <div class="export-card">
+        <h3>Exportar Dataset</h3>
+        <div class="export-row">
+          <div class="export-row__info">
+            <div class="export-row__name">JSON</div>
+            <div class="export-row__desc">Array completo · ideal para processamento Python/JS</div>
+          </div>
+          <button class="btn btn--accent" onclick="exportData('json')">⬇ Baixar JSON</button>
+        </div>
+        <div class="export-row">
+          <div class="export-row__info">
+            <div class="export-row__name">CSV</div>
+            <div class="export-row__desc">Tabular · compatível com Excel, pandas, R</div>
+          </div>
+          <button class="btn btn--accent" onclick="exportData('csv')">⬇ Baixar CSV</button>
+        </div>
+        <div class="export-row">
+          <div class="export-row__info">
+            <div class="export-row__name">JSONL (newline-delimited)</div>
+            <div class="export-row__desc">Uma linha por registro · ideal para fine-tuning de LLMs</div>
+          </div>
+          <button class="btn btn--accent" onclick="exportData('jsonl')">⬇ Baixar JSONL</button>
+        </div>
+        <div class="export-row">
+          <div class="export-row__info">
+            <div class="export-row__name">JSON + Matrizes Binárias</div>
+            <div class="export-row__desc">Inclui bit-string da matriz · para treino de visão computacional</div>
+          </div>
+          <button class="btn btn--accent" onclick="exportData('json','true')">⬇ Baixar JSON+Matrix</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
-<div class="result-panel">
-    <h2>Resultados</h2>
-    <ul id="result-list">
-        <li id="result-empty" style="border:none;background:none;padding:0">Nenhum código lido ainda.</li>
-    </ul>
-</div>
-
-<footer>html5-qrcode &mdash; Ambiente de Desenvolvimento Local</footer>
+<!-- TOASTS -->
+<div class="toasts" id="toasts"></div>
 
 <script src="/dist-dev/html5-qrcode.js"></script>
+<script src="/pipeline.js"></script>
 <script>
-    var Html5QrcodeScanner = window.__Html5QrcodeLibrary__.Html5QrcodeScanner;
-    var Html5Qrcode = window.__Html5QrcodeLibrary__.Html5Qrcode;
-    var Html5QrcodeSupportedFormats = window.__Html5QrcodeLibrary__.Html5QrcodeSupportedFormats;
+// ── Globals ──────────────────────────────────────────────────────────────
+const Html5QrcodeScanner = window.__Html5QrcodeLibrary__.Html5QrcodeScanner;
+const pipeline = new QrPipeline();
+const API = '';  // proxy via webpack-dev-server
+const VERSION = '1.0.2';
 
-    var scanCount = 0;
+let sessionId  = null;
+let scanTotal  = 0;
+let scanOk     = 0;
+let lastMs     = 0;
+let scanStart  = 0;
+let pageOffset = 0;
+const PAGE_SIZE = 50;
 
-    function onScanSuccess(decodedText, decodedResult) {
-        var list = document.getElementById("result-list");
-        var empty = document.getElementById("result-empty");
-        if (empty) empty.remove();
+// ── Init ─────────────────────────────────────────────────────────────────
+document.getElementById('app-version').textContent = VERSION;
 
-        scanCount++;
-        var item = document.createElement("li");
-        var format = (decodedResult && decodedResult.result && decodedResult.result.format)
-            ? decodedResult.result.format.formatName
-            : "QR";
+async function init() {
+    await checkApi();
+    sessionId = await createSession();
+    loadScans();
+    loadStats();
+}
 
-        item.innerHTML =
-            '<span class="tag">' + format + '</span>' +
-            '<span class="text">' + escapeHtml(decodedText) + '</span>';
-
-        list.insertBefore(item, list.firstChild);
-        if (list.children.length > 10) list.removeChild(list.lastChild);
+async function checkApi() {
+    try {
+        const r = await fetch(`${API}/api/health`);
+        const d = await r.json();
+        setDot('api', true); setDot('db', true);
+        document.getElementById('pill-db').textContent = `DB v${d.version}`;
+    } catch {
+        setDot('api', false); setDot('db', false);
+        toast('API offline — dados não serão persistidos', 'error');
     }
+}
 
-    function escapeHtml(text) {
-        return text
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;");
-    }
+async function createSession() {
+    try {
+        const info = { userAgent: navigator.userAgent };
+        const r = await fetch(`${API}/api/sessions`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ device_info: info })
+        });
+        const d = await r.json();
+        return d.id;
+    } catch { return null; }
+}
 
-    function docReady(fn) {
-        if (document.readyState === "complete" || document.readyState === "interactive") {
-            setTimeout(fn, 1);
-        } else {
-            document.addEventListener("DOMContentLoaded", fn);
-        }
-    }
+// ── Scanner ───────────────────────────────────────────────────────────────
+let scanner;
 
-    docReady(function () {
-        var scanner = new Html5QrcodeScanner(
-            "qr-reader",
-            {
-                fps: 10,
-                qrbox: { width: 280, height: 280 },
-                rememberLastUsedCamera: true,
-                showTorchButtonIfSupported: true,
-            },
-            /* verbose= */ false
-        );
-        scanner.render(onScanSuccess);
+function startScanner() {
+    scanner = new Html5QrcodeScanner('qr-reader', {
+        fps: 10,
+        qrbox: { width: 280, height: 280 },
+        rememberLastUsedCamera: true,
+        showTorchButtonIfSupported: true,
+    }, false);
+    scanner.render(onScanSuccess, onScanError);
+}
+
+function onScanSuccess(decodedText, decodedResult) {
+    const duration = scanStart ? Date.now() - scanStart : null;
+    scanStart = Date.now();
+    scanTotal++; scanOk++;
+    lastMs = duration;
+    updateMetrics();
+    setPipelineRunning();
+
+    // Captura canvas do scanner
+    const canvas = document.querySelector('#qr-reader canvas:not([style*="display: none"])') ||
+                   document.getElementById('qr-canvas');
+
+    // Executa pipeline
+    const pData = canvas ? pipeline.run(canvas, decodedResult) : {};
+    updatePipelineUI(pData);
+
+    const format = decodedResult?.result?.format?.formatName ?? 'UNKNOWN';
+    const device = getDeviceLabel();
+
+    const payload = {
+        session_id:      sessionId,
+        decoded_text:    decodedText,
+        format:          format,
+        read_success:    1,
+        source:          'camera',
+        scan_duration_ms: duration,
+        device_label:    device,
+        ...pData,
+        raw_result: decodedResult,
+    };
+
+    saveScan(payload);
+}
+
+function onScanError() {
+    if (!scanStart) scanStart = Date.now();
+}
+
+function getDeviceLabel() {
+    try {
+        const sel = document.querySelector('#qr-reader select');
+        return sel ? sel.options[sel.selectedIndex]?.text : null;
+    } catch { return null; }
+}
+
+// ── Pipeline UI ───────────────────────────────────────────────────────────
+function setPipelineRunning() {
+    ['p0','p1','p2','p3'].forEach(id => {
+        const el = document.getElementById(id);
+        el.className = 'step__icon running';
     });
+}
+
+function updatePipelineUI(p) {
+    setStep('p0','pv0', !!p.image_raw,    `${p.frame_width ?? '?'}×${p.frame_height ?? '?'}px`);
+    setStep('p1','pv1', p.threshold_value != null, `t=${p.threshold_value ?? '?'} (${p.threshold_method ?? '?'})`);
+    setStep('p2','pv2', !!p.matrix_data,  p.matrix_data ? `${p.matrix_width}×${p.matrix_height} v${p.qr_version ?? '?'}` : 'n/a');
+}
+
+function setStep(iconId, valId, ok, label) {
+    const el = document.getElementById(iconId);
+    el.className = 'step__icon ' + (ok ? 'ok' : 'idle');
+    document.getElementById(valId).textContent = label;
+}
+
+function markPersisted(ok) {
+    setStep('p3', 'pv3', ok, ok ? 'salvo' : 'erro');
+}
+
+// ── API ───────────────────────────────────────────────────────────────────
+async function saveScan(payload) {
+    try {
+        const r = await fetch(`${API}/api/scans`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const d = await r.json();
+        markPersisted(!!d.id);
+        toast(`✓ ${payload.decoded_text.substring(0,40)} [${payload.format}]`, 'ok');
+        loadScans();
+        loadStats();
+    } catch(e) {
+        markPersisted(false);
+        toast('Erro ao salvar no banco', 'error');
+    }
+}
+
+async function loadScans() {
+    const search = document.getElementById('search-input').value;
+    const params = new URLSearchParams({ limit: PAGE_SIZE, offset: pageOffset });
+    if (search) params.set('search', search);
+    try {
+        const r = await fetch(`${API}/api/scans?${params}`);
+        const d = await r.json();
+        renderTable(d.rows, d.total);
+    } catch {}
+}
+
+async function loadStats() {
+    try {
+        const r = await fetch(`${API}/api/scans/stats`);
+        const d = await r.json();
+        renderStats(d);
+    } catch {}
+}
+
+async function deleteScan(id) {
+    if (!confirm('Remover este registro?')) return;
+    await fetch(`${API}/api/scans/${id}`, { method:'DELETE' });
+    loadScans(); loadStats();
+}
+
+function exportData(fmt, matrix) {
+    const p = new URLSearchParams({ format: fmt });
+    if (matrix) p.set('include_matrix', 'true');
+    window.open(`${API}/api/export?${p}`, '_blank');
+}
+
+// ── Render ────────────────────────────────────────────────────────────────
+function renderTable(rows, total) {
+    const tbody = document.getElementById('result-tbody');
+    document.getElementById('tbl-info').textContent = `${total} registros`;
+
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:32px;color:var(--text3)">Nenhum resultado encontrado.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td class="td-time">${r.id}</td>
+        <td><span class="td-text" title="${esc(r.decoded_text)}">${esc(r.decoded_text ?? '—')}</span></td>
+        <td><span class="td-format">${r.format ?? '—'}</span></td>
+        <td class="${r.read_success ? 'td-ok':'td-fail'}">${r.read_success ? '✓':'✗'}</td>
+        <td class="td-dur">${r.threshold_value ?? '—'}</td>
+        <td class="td-dur">${r.matrix_width ? `${r.matrix_width}×${r.matrix_height}` : '—'}</td>
+        <td class="td-dur">${r.qr_version ? `v${r.qr_version}` : '—'}</td>
+        <td class="td-dur">${r.scan_duration_ms ? r.scan_duration_ms+'ms' : '—'}</td>
+        <td class="td-time">${fmtDate(r.timestamp)}</td>
+        <td><button class="btn btn--danger" onclick="deleteScan(${r.id})">✕</button></td>
+      </tr>`
+    ).join('');
+}
+
+function renderStats(d) {
+    const s = d.stats;
+    document.getElementById('st-total').textContent = s.total ?? 0;
+    document.getElementById('st-ok').textContent    = s.success ?? 0;
+    document.getElementById('st-fail').textContent  = s.failed ?? 0;
+    const rate = s.total ? ((s.success/s.total)*100).toFixed(1) : '—';
+    document.getElementById('st-rate').textContent  = rate;
+    document.getElementById('st-dur').textContent   = s.avg_duration_ms ?? '—';
+    document.getElementById('st-fmts').textContent  = s.formats_seen ?? 0;
+
+    const maxN = d.byFormat.reduce((m,r) => Math.max(m, r.n), 1);
+    document.getElementById('format-bars-body').innerHTML = d.byFormat.map(r => `
+      <div class="bar-row">
+        <span class="bar-label">${r.format}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${(r.n/maxN*100).toFixed(1)}%"></div></div>
+        <span class="bar-count">${r.n}</span>
+      </div>`
+    ).join('') || '<span style="color:var(--text3);font-size:.8rem">Sem dados ainda.</span>';
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function updateMetrics() {
+    document.getElementById('m-total').textContent = scanTotal;
+    document.getElementById('m-ok').textContent    = scanOk;
+    const rate = scanTotal ? ((scanOk/scanTotal)*100).toFixed(0)+'%' : '—';
+    document.getElementById('m-rate').textContent = rate;
+    document.getElementById('m-ms').textContent   = lastMs ? lastMs+'ms' : '—';
+    setDot('cam', true);
+}
+
+function setDot(name, on) {
+    const d = document.getElementById(`dot-${name}`);
+    if (d) d.className = 'status-dot ' + (on ? 'on' : '');
+}
+
+function fmtDate(ts) {
+    if (!ts) return '—';
+    const d = new Date(ts);
+    return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR');
+}
+
+function esc(t) {
+    return String(t ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function toast(msg, type) {
+    const box = document.getElementById('toasts');
+    const el  = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    box.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+}
+
+function prevPage() { if (pageOffset >= PAGE_SIZE) { pageOffset -= PAGE_SIZE; loadScans(); } }
+function nextPage() { pageOffset += PAGE_SIZE; loadScans(); }
+function clearFilter() { document.getElementById('search-input').value=''; pageOffset=0; loadScans(); }
+
+// Tabs
+document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+        document.querySelectorAll('.tab,.tab-content').forEach(e => e.classList.remove('active'));
+        t.classList.add('active');
+        document.querySelector(`.tab-content[data-content="${t.dataset.tab}"]`).classList.add('active');
+        if (t.dataset.tab === 'stats') loadStats();
+    });
+});
+
+document.getElementById('search-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { pageOffset = 0; loadScans(); }
+});
+
+// Boot
+init().then(startScanner);
 </script>
 </body>
 </html>

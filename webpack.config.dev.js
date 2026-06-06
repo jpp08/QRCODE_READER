@@ -37,5 +37,12 @@ module.exports = {
         headers: {
             "Access-Control-Allow-Origin": "*",
         },
+        proxy: [
+            {
+                context: ["/api", "/data"],
+                target: "http://localhost:4001",
+                changeOrigin: true,
+            },
+        ],
     },
 };
